@@ -1,4 +1,4 @@
-//! E2E test: Battery service GetBst via FF-A Direct Request v2.
+//! E2E test: Battery service GetBst and GetPsr via FF-A Direct Request v2.
 //!
 //! SPDX-License-Identifier: MIT
 //!
@@ -13,30 +13,37 @@ use uefi::prelude::*;
 
 /// EC Battery GetBst opcode (see battery-service-relay `BatteryCmd::GetBst = 2`).
 const EC_BAT_GET_BST: u8 = 0x02;
+/// EC Battery GetPsr opcode (see battery-service-relay `BatteryCmd::GetPsr = 3`).
+const EC_BAT_GET_PSR: u8 = 0x03;
+
+/// EC dev-qemu registers a single fuel gauge as battery 0 by default. A second
+/// pack requires the EC's opt-in `dual-fuel-gauge` feature.
+const BATTERY_ID: u8 = 0;
 
 // EC dev-qemu MockFuelGauge BST values, mapped by the EC's compute_bst. These
-// are fixed mock constants, asserted exactly. State, rate and capacity are the
-// same across both fuel-gauge profiles; only the pack voltage differs.
+// are fixed mock constants, asserted exactly.
 const EXPECT_STATE_DISCHARGING: u32 = 0x1; // ACPI BatteryState::DISCHARGING = 1<<0
 const EXPECT_PRESENT_RATE: u32 = 1500; // |−1500 mA| discharge
 const EXPECT_REMAINING_CAPACITY: u32 = 2304; // mAh
-const EXPECT_VOLTAGE_3S: u32 = 11850; // mV (3 × 3950), battery 0
-const EXPECT_VOLTAGE_2S: u32 = 7900; // mV (2 × 3950), battery 1
+const EXPECT_PRESENT_VOLTAGE: u32 = 11850; // mV (3 × 3950)
+
+// ACPI _PSR Offline. The EC's mock adapter starts unplugged and only the
+// `time-alarm-power-input` build plugs it in (via GPIO2).
+const EXPECT_PSR_OFFLINE: u32 = 0;
 
 #[entry]
 fn main() -> Status {
-    run_tests(test_battery_get_bst)
+    run_tests(test_battery_command_family)
+}
+
+fn test_battery_command_family(ctx: &mut E2eContext) {
+    test_battery_get_bst(ctx);
+    test_battery_get_psr(ctx);
 }
 
 fn test_battery_get_bst(ctx: &mut E2eContext) {
-    // Battery 0 is the 3S pack; battery 1 the 2S pack. Both share state/rate/
-    // capacity and differ only in pack voltage, so the id must select the pack.
-    check_battery_bst(ctx, "battery0_get_bst", 0, EXPECT_VOLTAGE_3S);
-    check_battery_bst(ctx, "battery1_get_bst", 1, EXPECT_VOLTAGE_2S);
-}
-
-fn check_battery_bst(ctx: &mut E2eContext, name: &str, battery_id: u8, expect_voltage: u32) {
-    let Some(resp_payload) = ctx.send_command(name, &BATTERY_UUID, EC_BAT_GET_BST, &[battery_id])
+    const NAME: &str = "battery_get_bst";
+    let Some(resp_payload) = ctx.send_command(NAME, &BATTERY_UUID, EC_BAT_GET_BST, &[BATTERY_ID])
     else {
         return;
     };
@@ -49,7 +56,7 @@ fn check_battery_bst(ctx: &mut E2eContext, name: &str, battery_id: u8, expect_vo
 
     log::info!(
         "  GetBst[id={}]: state={:#x} rate={} capacity={} voltage={}",
-        battery_id,
+        BATTERY_ID,
         state,
         rate,
         capacity,
@@ -59,20 +66,37 @@ fn check_battery_bst(ctx: &mut E2eContext, name: &str, battery_id: u8, expect_vo
     // Exact equality: the mock is discharging only (DISCHARGING set, CHARGING /
     // CRITICAL / CHARGE_LIMITING clear), so the ACPI state word is exactly 0x1.
     if state != EXPECT_STATE_DISCHARGING {
-        ctx.fail(name, "EC BST state != DISCHARGING-only (0x1)");
+        ctx.fail(NAME, "EC BST state != DISCHARGING-only (0x1)");
         return;
     }
     if rate != EXPECT_PRESENT_RATE {
-        ctx.fail(name, "present_rate != EC mock value");
+        ctx.fail(NAME, "present_rate != EC mock value");
         return;
     }
     if capacity != EXPECT_REMAINING_CAPACITY {
-        ctx.fail(name, "remaining_capacity != EC mock value");
+        ctx.fail(NAME, "remaining_capacity != EC mock value");
         return;
     }
-    if voltage != expect_voltage {
-        ctx.fail(name, "present_voltage != EC mock value for battery id");
+    if voltage != EXPECT_PRESENT_VOLTAGE {
+        ctx.fail(NAME, "present_voltage != EC mock value");
         return;
     }
-    ctx.pass(name);
+    ctx.pass(NAME);
+}
+
+fn test_battery_get_psr(ctx: &mut E2eContext) {
+    const NAME: &str = "battery_get_psr";
+    let Some(resp_payload) = ctx.send_command(NAME, &BATTERY_UUID, EC_BAT_GET_PSR, &[BATTERY_ID])
+    else {
+        return;
+    };
+    // Response layout: power source (LE u32) @0.
+    let power_source = resp_payload.u32_at(0);
+    log::info!("  GetPsr[id={}]: power_source={}", BATTERY_ID, power_source);
+
+    if power_source != EXPECT_PSR_OFFLINE {
+        ctx.fail(NAME, "_PSR != Offline without the power-input build");
+        return;
+    }
+    ctx.pass(NAME);
 }
