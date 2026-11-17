@@ -28,7 +28,7 @@ const TPM2_FFA_START: u64 = 0x0f00_0201;
 const TPM2_FFA_REGISTER_FOR_NOTIFICATION: u64 = 0x0f00_0301;
 const TPM2_FFA_UNREGISTER_FOR_NOTIFICATION: u64 = 0x0f00_0401;
 const TPM2_FFA_FINISH_NOTIFIED: u64 = 0x0f00_0501;
-const TPM2_FFA_MANAGE_LOCALITY: u64 = 0x1f00_0001;
+const TPM2_FFA_MANAGE_LOCALITY: u64 = 0x0f00_0701;
 
 // ---------------------------------------------------------------------------
 // TPM Service Status Codes (returned in Arg0 / register x4 of response)
@@ -199,14 +199,15 @@ const NOTIFICATION_SEQUENCE: &[StatusCase] = &[
     },
 ];
 
-// ManageLocality tests (SP built with test-bypass-locality-check).
+// ManageLocality tests (SP built with test-bypass-locality-check). CRB over
+// FF-A v1.1 only lets ManageLocality open or close localities 2 and 3.
 const MANAGE_LOCALITY_CASES: &[StatusCase] = &[
-    // ManageLocality(OPEN, locality=0) should succeed.
+    // ManageLocality(OPEN, locality=2) on closed locality 2 should succeed.
     StatusCase {
         name: "tpm_manage_locality_open",
         opcode: TPM2_FFA_MANAGE_LOCALITY,
         function: MANAGE_LOCALITY_OPEN,
-        locality: 0,
+        locality: 2,
         expected: TPM2_FFA_SUCCESS_OK,
     },
     // ManageLocality with invalid operation (not OPEN or CLOSE) → INV_ARG.
@@ -214,12 +215,20 @@ const MANAGE_LOCALITY_CASES: &[StatusCase] = &[
         name: "tpm_manage_locality_invalid_op",
         opcode: TPM2_FFA_MANAGE_LOCALITY,
         function: 0x2,
+        locality: 2,
+        expected: TPM2_FFA_INV_ARG,
+    },
+    // ManageLocality on a locality other than 2 or 3 → INV_ARG.
+    StatusCase {
+        name: "tpm_manage_locality_invalid_locality",
+        opcode: TPM2_FFA_MANAGE_LOCALITY,
+        function: MANAGE_LOCALITY_OPEN,
         locality: 0,
         expected: TPM2_FFA_INV_ARG,
     },
 ];
 
-// Cases requiring open locality (locality 0 was opened above).
+// Cases requiring an open locality (localities 0 and 1 are open by default).
 const OPEN_LOCALITY_CASES: &[StatusCase] = &[
     // Start(COMMAND) on open locality with no command queued in CRB
     // → INV_CRB_CTRL_DATA (per DEN0138, the CRB control data is invalid
@@ -262,12 +271,12 @@ const OPEN_LOCALITY_CASES: &[StatusCase] = &[
     },
 ];
 
-// Close locality.
+// Close the locality opened by tpm_manage_locality_open.
 const LOCALITY_CLOSE_CASE: &[StatusCase] = &[StatusCase {
     name: "tpm_manage_locality_close",
     opcode: TPM2_FFA_MANAGE_LOCALITY,
     function: MANAGE_LOCALITY_CLOSE,
-    locality: 0,
+    locality: 2,
     expected: TPM2_FFA_SUCCESS_OK,
 }];
 
@@ -284,10 +293,10 @@ fn run_tpm_tests(ctx: &mut E2eContext) {
     // register → unregister → finish sequence.
     run_status_cases(ctx, NOTIFICATION_SEQUENCE);
 
-    // ManageLocality open + invalid op.
+    // ManageLocality open + invalid op + invalid locality.
     run_status_cases(ctx, MANAGE_LOCALITY_CASES);
 
-    // Cases requiring open locality (locality 0 was opened above).
+    // Cases requiring open locality (locality 0 is open by default).
     run_status_cases(ctx, OPEN_LOCALITY_CASES);
 
     // CRB state machine tests — exercises handle_command + tpm_sst.
@@ -295,7 +304,7 @@ fn run_tpm_tests(ctx: &mut E2eContext) {
     // then trigger the state machine via Start(LOCALITY/COMMAND).
     test_crb_state_machine(ctx);
 
-    // Close locality.
+    // Close the locality opened by the ManageLocality cases.
     run_status_cases(ctx, LOCALITY_CLOSE_CASE);
 }
 
@@ -303,7 +312,7 @@ fn run_tpm_tests(ctx: &mut E2eContext) {
 // Tests
 // ---------------------------------------------------------------------------
 
-/// Verify GetInterfaceVersion returns success and the correct v1.0 version.
+/// Verify GetInterfaceVersion returns success and the correct v1.1 version.
 fn test_get_interface_version(ctx: &mut E2eContext) {
     let payload = tpm_request(TPM2_FFA_GET_INTERFACE_VERSION, 0, 0);
     let Some(resp) = tpm_send(ctx, "tpm_get_interface_version", &payload) else {
@@ -323,11 +332,11 @@ fn test_get_interface_version(ctx: &mut E2eContext) {
         return;
     }
 
-    // Version should be (major << 16) | minor = (1 << 16) | 0 = 0x10000
-    if version != 0x1_0000 {
+    // Version should be (major << 16) | minor = (1 << 16) | 1 = 0x10001
+    if version != 0x1_0001 {
         ctx.fail(
             "tpm_get_interface_version",
-            "expected version 1.0 (0x10000)",
+            "expected version 1.1 (0x10001)",
         );
         return;
     }

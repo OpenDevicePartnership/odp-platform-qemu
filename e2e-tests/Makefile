@@ -123,12 +123,12 @@ test-sp-services:
 # Explicit single-QEMU service runs (no EC sidecar). Two public targets
 # share one recipe; each sets its service name and the exact "N passed,
 # 0 failed" count, threaded into scripts/test-sp-services.sh so a truncated
-# but all-green run (e.g. TPM stopping at 22, UCSI at 6) is rejected, not
+# but all-green run (e.g. TPM stopping at 23, UCSI at 6) is rejected, not
 # silently accepted by the generic parser. test-sp-services invokes these
 # sequentially so concurrent QEMU instances never collide on Build/.
 .PHONY: sp-service-run-tpm sp-service-run-ucsi
 sp-service-run-tpm:  SERVICE := tpm
-sp-service-run-tpm:  EXPECTED_PASS := 23
+sp-service-run-tpm:  EXPECTED_PASS := 24
 sp-service-run-ucsi: SERVICE := ucsi
 sp-service-run-ucsi: EXPECTED_PASS := 7
 sp-service-run-tpm:  Build/vdrive-tpm  $(COVERAGE_PLUGIN)
