@@ -14,7 +14,8 @@ ARG NASM_VERSION=2.16.01
 ARG CSPELL_VERSION=5.20.0
 ARG MARKDOWNLINT_VERSION=0.32.2
 ARG MDBOOK_VERSION=0.4.52
-ARG CARGO_XWIN_VERSION=0.23.0
+# xwin 0.10 handles forward-slash SDK payload paths in the VS manifest.
+ARG CARGO_XWIN_VERSION=0.23.1
 
 # Visit this NuGet package version page to see the latest version available
 # https://dev.azure.com/projectmu/acpica/_artifacts/feed/mu_iasl/NuGet/edk2-acpica-iasl/versions
@@ -128,6 +129,10 @@ RUN RUST_VERSION=1.92.0 && \
     cargo binstall -y defmt-print@1.0.0 && \
     cargo binstall -y cargo-xwin@${CARGO_XWIN_VERSION} && \
     cargo binstall -y mdbook@${MDBOOK_VERSION}
+
+# Exercise a fresh SDK download and ARM64 static-CRT link before image publication.
+COPY scripts/tests/test-xwin-setup.sh /tmp/test-xwin-setup.sh
+RUN bash /tmp/test-xwin-setup.sh
 USER root
 
 #
